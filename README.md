@@ -202,4 +202,8 @@ v.AddPath("/orders", http.MethodPost, doc, &openapi3.Operation{
 })
 ```
 
-Swagger UI handlers are available via `SwaggerChi` and `SwaggerGorilla`.
+Serve a Swagger UI with `SwaggerHandler` or `SwaggerHandlerMust` (standard `http.Handler`):
+
+```go
+http.Handle("/swagger/", v.SwaggerHandlerMust("/swagger/", doc))
+```
