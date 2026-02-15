@@ -49,6 +49,9 @@ func UnmarshalAndValidateCtx(ctx context.Context, b []byte, dst any) error {
 	return ValidateCtx(ctx, dst)
 }
 
+// DecodeAndValidate reads JSON from r into dst using a streaming decoder,
+// then normalizes and validates. Use this instead of [UnmarshalAndValidate]
+// when reading directly from an [io.Reader] such as an HTTP request body.
 func DecodeAndValidate(r io.Reader, dst any) error {
 	return DecodeAndValidateContext(context.Background(), r, dst)
 }
@@ -230,7 +233,7 @@ func (b *rulerBridge) Validate(value any) error {
 // Embedded Ruler fields are expanded via expandFields for flat error keys.
 // A rulerBridge is appended to each field so ozzo recurses into Ruler children.
 func convertFieldRules(ctx context.Context, structPtr any, fields ...*FieldRules) []*validation.FieldRules {
-	flat := expandFields(ctx, structPtr, fields)
+	flat := ExpandFields(ctx, structPtr, fields)
 
 	vFields := make([]*validation.FieldRules, len(flat))
 	for i, fr := range flat {

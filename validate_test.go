@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	v "github.com/Gobd/apivalidation"
+	"github.com/Gobd/apivalidation/transform"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -228,7 +229,7 @@ type normAddress struct {
 }
 
 func (a *normAddress) Normalize() {
-	v.StructTrimSpace(a)
+	transform.StructTrimSpace(a)
 	a.City = strings.ToUpper(a.City)
 }
 
@@ -238,7 +239,7 @@ type normOrder struct {
 }
 
 func (o *normOrder) Normalize() {
-	v.StructTrimSpace(o)
+	transform.StructTrimSpace(o)
 }
 
 // ============ Tests ============
@@ -925,7 +926,7 @@ func TestStructTrimSpace(t *testing.T) {
 		Inner: inner{Val: " world "},
 		Items: []string{" a ", " b "},
 	}
-	v.StructTrimSpace(&o)
+	transform.StructTrimSpace(&o)
 	assert.Equal(t, "hello", o.Name)
 	assert.Equal(t, "world", o.Inner.Val)
 	assert.Equal(t, []string{"a", "b"}, o.Items)
@@ -939,7 +940,7 @@ func TestStructTrimSpace_Nested(t *testing.T) {
 		Children []child
 	}
 	p := parent{Children: []child{{Name: "  a  "}, {Name: " b "}}}
-	v.StructTrimSpace(&p)
+	transform.StructTrimSpace(&p)
 	assert.Equal(t, "a", p.Children[0].Name)
 	assert.Equal(t, "b", p.Children[1].Name)
 }
@@ -949,7 +950,7 @@ func TestStructTrimSpace_MapValues(t *testing.T) {
 		Data map[string]string
 	}
 	x := s{Data: map[string]string{"k": "  val  "}}
-	v.StructTrimSpace(&x)
+	transform.StructTrimSpace(&x)
 	assert.Equal(t, "val", x.Data["k"])
 }
 
@@ -961,7 +962,7 @@ func TestStructTrimSpace_PointerField(t *testing.T) {
 		Inner *inner
 	}
 	o := outer{Inner: &inner{Val: "  trimme  "}}
-	v.StructTrimSpace(&o)
+	transform.StructTrimSpace(&o)
 	assert.Equal(t, "trimme", o.Inner.Val)
 }
 
@@ -973,7 +974,7 @@ func TestStructTrimSpace_NilPointer(_ *testing.T) {
 		Inner *inner
 	}
 	o := outer{Inner: nil}
-	v.StructTrimSpace(&o) // should not panic
+	transform.StructTrimSpace(&o) // should not panic
 }
 
 func TestStructStringFunc(t *testing.T) {
@@ -981,7 +982,7 @@ func TestStructStringFunc(t *testing.T) {
 		Name string
 	}
 	x := s{Name: "Hello World"}
-	v.StructStringFunc(&x, strings.ToUpper)
+	transform.StructStringFunc(&x, strings.ToUpper)
 	assert.Equal(t, "HELLO WORLD", x.Name)
 }
 

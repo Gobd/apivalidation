@@ -1,6 +1,9 @@
 package apivalidation
 
 import (
+	"context"
+	"reflect"
+
 	"github.com/getkin/kin-openapi/openapi3"
 )
 
@@ -40,3 +43,60 @@ type (
 		ValueRules() []Rule
 	}
 )
+
+// FieldPtr returns the struct field pointer bound to this FieldRules.
+func (fr *FieldRules) FieldPtr() any { return fr.fieldPtr }
+
+// Tag returns the resolved JSON tag name for this field.
+func (fr *FieldRules) Tag() string { return fr.tag }
+
+// SetTag sets the resolved JSON tag name for this field.
+func (fr *FieldRules) SetTag(tag string) { fr.tag = tag }
+
+// RuleList returns the validation rules bound to this field.
+func (fr *FieldRules) RuleList() []Rule { return fr.rules }
+
+// Ruler is implemented by types that define validation rules for their fields.
+// Use a pointer receiver so field pointers are stable:
+//
+//	func (s *MyStruct) Rules() []*FieldRules {
+//	    return []*FieldRules{Field(&s.Name, Required)}
+//	}
+type Ruler interface {
+	Rules() []*FieldRules
+}
+
+// ContextRuler is like [Ruler] but receives a context (for conditional rules).
+type ContextRuler interface {
+	Rules(context.Context) []*FieldRules
+}
+
+// FindStructField returns the [reflect.StructField] whose address matches fieldValue
+// within structValue. It recurses into anonymous (embedded) struct fields.
+// Returns nil if no match is found.
+func FindStructField(structValue reflect.Value, fieldValue reflect.Value) *reflect.StructField {
+	ptr := fieldValue.Pointer()
+	for i := structValue.NumField() - 1; i >= 0; i-- {
+		sf := structValue.Type().Field(i)
+		if ptr == structValue.Field(i).UnsafeAddr() {
+			// do additional type comparison because it's possible that the address of
+			// an embedded struct is the same as the first field of the embedded struct
+			if sf.Type == fieldValue.Elem().Type() {
+				return &sf
+			}
+		}
+		if sf.Anonymous {
+			// delve into anonymous struct to look for the field
+			fi := structValue.Field(i)
+			if sf.Type.Kind() == reflect.Ptr {
+				fi = fi.Elem()
+			}
+			if fi.Kind() == reflect.Struct {
+				if f := FindStructField(fi, fieldValue); f != nil {
+					return f
+				}
+			}
+		}
+	}
+	return nil
+}

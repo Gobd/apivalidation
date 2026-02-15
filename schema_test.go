@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	v "github.com/Gobd/apivalidation"
+	"github.com/Gobd/apivalidation/openapi"
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -214,7 +215,7 @@ func (s *schemaContextRuler) Rules(_ context.Context) []*v.FieldRules {
 // schemaFor is a test helper that extracts the schema for a type via NewRequest.
 func schemaFor(t *testing.T, value any) *openapi3.Schema {
 	t.Helper()
-	req, err := v.NewRequest(value)
+	req, err := openapi.NewRequest(value)
 	require.NoError(t, err)
 	content := req.Value.Content["application/json"]
 	require.NotNil(t, content)
@@ -396,7 +397,7 @@ func TestSchema_ValueRuler_MinMaxDescription(t *testing.T) {
 // --- NewRequest tests ---
 
 func TestNewRequest_SingleType(t *testing.T) {
-	req, err := v.NewRequest(schemaBasic{})
+	req, err := openapi.NewRequest(schemaBasic{})
 	require.NoError(t, err)
 	require.NotNil(t, req)
 	require.NotNil(t, req.Value)
@@ -411,7 +412,7 @@ func TestNewRequest_SingleType(t *testing.T) {
 }
 
 func TestNewRequest_MultipleTypes(t *testing.T) {
-	req, err := v.NewRequest(schemaBasic{}, schemaWithEnum{})
+	req, err := openapi.NewRequest(schemaBasic{}, schemaWithEnum{})
 	require.NoError(t, err)
 	require.NotNil(t, req)
 
@@ -425,19 +426,19 @@ func TestNewRequest_MultipleTypes(t *testing.T) {
 }
 
 func TestNewRequest_NoValues(t *testing.T) {
-	_, err := v.NewRequest()
+	_, err := openapi.NewRequest()
 	assert.Error(t, err)
 }
 
 func TestNewRequestMust_Panics(t *testing.T) {
 	assert.Panics(t, func() {
-		v.NewRequestMust() // no values → error → panic
+		openapi.NewRequestMust() // no values → error → panic
 	})
 }
 
 func TestNewRequestMust_NoPanic(t *testing.T) {
 	assert.NotPanics(t, func() {
-		ref := v.NewRequestMust(schemaBasic{})
+		ref := openapi.NewRequestMust(schemaBasic{})
 		assert.NotNil(t, ref)
 	})
 }
@@ -445,8 +446,8 @@ func TestNewRequestMust_NoPanic(t *testing.T) {
 // --- NewResponse tests ---
 
 func TestNewResponse_SingleStatusCode(t *testing.T) {
-	resp, err := v.NewResponse(map[string]v.Response{
-		"200": {Desc: "success", V: []any{schemaBasic{}}},
+	resp, err := openapi.NewResponse(map[string]openapi.Response{
+		"200": {Desc: "success", Bodies: []any{schemaBasic{}}},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -457,9 +458,9 @@ func TestNewResponse_SingleStatusCode(t *testing.T) {
 }
 
 func TestNewResponse_MultipleStatusCodes(t *testing.T) {
-	resp, err := v.NewResponse(map[string]v.Response{
-		"200": {Desc: "success", V: []any{schemaBasic{}}},
-		"400": {Desc: "bad request", V: []any{schemaWithEnum{}}},
+	resp, err := openapi.NewResponse(map[string]openapi.Response{
+		"200": {Desc: "success", Bodies: []any{schemaBasic{}}},
+		"400": {Desc: "bad request", Bodies: []any{schemaWithEnum{}}},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -469,8 +470,8 @@ func TestNewResponse_MultipleStatusCodes(t *testing.T) {
 }
 
 func TestNewResponse_MultipleTypesOneOf(t *testing.T) {
-	resp, err := v.NewResponse(map[string]v.Response{
-		"200": {Desc: "success", V: []any{schemaBasic{}, schemaWithEnum{}}},
+	resp, err := openapi.NewResponse(map[string]openapi.Response{
+		"200": {Desc: "success", Bodies: []any{schemaBasic{}, schemaWithEnum{}}},
 	})
 	require.NoError(t, err)
 
@@ -482,20 +483,20 @@ func TestNewResponse_MultipleTypesOneOf(t *testing.T) {
 }
 
 func TestNewResponse_NoValues(t *testing.T) {
-	_, err := v.NewResponse(map[string]v.Response{})
+	_, err := openapi.NewResponse(map[string]openapi.Response{})
 	assert.Error(t, err)
 }
 
 func TestNewResponseMust_Panics(t *testing.T) {
 	assert.Panics(t, func() {
-		v.NewResponseMust(map[string]v.Response{})
+		openapi.NewResponseMust(map[string]openapi.Response{})
 	})
 }
 
 // --- DocBase tests ---
 
 func TestDocBase(t *testing.T) {
-	doc := v.DocBase("test-service", "A test service", "1.0.0")
+	doc := openapi.DocBase("test-service", "A test service", "1.0.0")
 
 	assert.Equal(t, "3.0.3", doc.OpenAPI)
 	assert.Equal(t, "test-service", doc.Info.Title)
@@ -514,7 +515,7 @@ func TestDocBase(t *testing.T) {
 // --- AddPath tests ---
 
 func TestAddPath_Methods(t *testing.T) {
-	doc := v.DocBase("test", "test", "1.0")
+	doc := openapi.DocBase("test", "test", "1.0")
 
 	methods := []string{
 		http.MethodGet,
@@ -529,7 +530,7 @@ func TestAddPath_Methods(t *testing.T) {
 			OperationID: method + "-test",
 			Responses:   openapi3.NewResponses(),
 		}
-		v.AddPath("/test-"+method, method, doc, op)
+		openapi.AddPath("/test-"+method, method, doc, op)
 	}
 
 	assert.NotNil(t, doc.Paths.Value("/test-GET").Get)
@@ -540,7 +541,7 @@ func TestAddPath_Methods(t *testing.T) {
 }
 
 func TestAddPath_SamePath(t *testing.T) {
-	doc := v.DocBase("test", "test", "1.0")
+	doc := openapi.DocBase("test", "test", "1.0")
 
 	getOp := &openapi3.Operation{
 		OperationID: "getItems",
@@ -551,8 +552,8 @@ func TestAddPath_SamePath(t *testing.T) {
 		Responses:   openapi3.NewResponses(),
 	}
 
-	v.AddPath("/items", http.MethodGet, doc, getOp)
-	v.AddPath("/items", http.MethodPost, doc, postOp)
+	openapi.AddPath("/items", http.MethodGet, doc, getOp)
+	openapi.AddPath("/items", http.MethodPost, doc, postOp)
 
 	path := doc.Paths.Value("/items")
 	require.NotNil(t, path)
@@ -565,11 +566,11 @@ func TestAddPath_SamePath(t *testing.T) {
 // --- Full round-trip: build a complete doc and validate it ---
 
 func TestFullDocRoundTrip(t *testing.T) {
-	doc := v.DocBase("api", "API", "1.0")
+	doc := openapi.DocBase("api", "API", "1.0")
 
-	req := v.NewRequestMust(schemaBasic{})
-	resp, err := v.NewResponse(map[string]v.Response{
-		"200": {Desc: "ok", V: []any{schemaBasic{}}},
+	req := openapi.NewRequestMust(schemaBasic{})
+	resp, err := openapi.NewResponse(map[string]openapi.Response{
+		"200": {Desc: "ok", Bodies: []any{schemaBasic{}}},
 	})
 	require.NoError(t, err)
 
@@ -578,7 +579,7 @@ func TestFullDocRoundTrip(t *testing.T) {
 		RequestBody: req,
 		Responses:   resp,
 	}
-	v.AddPath("/basics", http.MethodPost, doc, op)
+	openapi.AddPath("/basics", http.MethodPost, doc, op)
 
 	err = doc.Validate(context.Background())
 	require.NoError(t, err)
@@ -587,4 +588,77 @@ func TestFullDocRoundTrip(t *testing.T) {
 	b, err := doc.MarshalJSON()
 	require.NoError(t, err)
 	assert.NotEmpty(t, b)
+}
+
+// --- Endpoint helper tests ---
+
+func TestPost_SimpleEndpoint(t *testing.T) {
+	doc := openapi.DocBase("test", "test", "1.0")
+
+	openapi.Post(doc, "/orders", "createOrder", openapi.Endpoint{
+		Summary:  "Create an order",
+		Request:  schemaBasic{},
+		Response: schemaBasic{},
+	})
+
+	path := doc.Paths.Value("/orders")
+	require.NotNil(t, path)
+	require.NotNil(t, path.Post)
+	assert.Equal(t, "createOrder", path.Post.OperationID)
+	assert.Equal(t, "Create an order", path.Post.Summary)
+	assert.NotNil(t, path.Post.RequestBody)
+	assert.NotNil(t, path.Post.Responses)
+
+	err := doc.Validate(context.Background())
+	require.NoError(t, err)
+}
+
+func TestGet_NoRequestBody(t *testing.T) {
+	doc := openapi.DocBase("test", "test", "1.0")
+
+	openapi.Get(doc, "/orders", "listOrders", openapi.Endpoint{
+		Response: schemaBasic{},
+	})
+
+	path := doc.Paths.Value("/orders")
+	require.NotNil(t, path)
+	require.NotNil(t, path.Get)
+	assert.Nil(t, path.Get.RequestBody)
+
+	err := doc.Validate(context.Background())
+	require.NoError(t, err)
+}
+
+func TestEndpoint_CustomResponses(t *testing.T) {
+	doc := openapi.DocBase("test", "test", "1.0")
+
+	openapi.Post(doc, "/orders", "createOrder", openapi.Endpoint{
+		Request: schemaBasic{},
+		Responses: map[string]openapi.Response{
+			"200": {Desc: "success", Bodies: []any{schemaBasic{}}},
+			"400": {Desc: "bad request", Bodies: []any{schemaWithEnum{}}},
+		},
+	})
+
+	err := doc.Validate(context.Background())
+	require.NoError(t, err)
+}
+
+func TestAllMethods(t *testing.T) {
+	doc := openapi.DocBase("test", "test", "1.0")
+
+	ep := openapi.Endpoint{Response: schemaBasic{}}
+	openapi.Get(doc, "/r", "get", ep)
+	openapi.Post(doc, "/r", "post", ep)
+	openapi.Put(doc, "/r", "put", ep)
+	openapi.Patch(doc, "/r", "patch", ep)
+	openapi.Delete(doc, "/r", "delete", ep)
+
+	path := doc.Paths.Value("/r")
+	require.NotNil(t, path)
+	assert.NotNil(t, path.Get)
+	assert.NotNil(t, path.Post)
+	assert.NotNil(t, path.Put)
+	assert.NotNil(t, path.Patch)
+	assert.NotNil(t, path.Delete)
 }
