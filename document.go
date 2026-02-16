@@ -44,18 +44,6 @@ type (
 	}
 )
 
-// FieldPtr returns the struct field pointer bound to this FieldRules.
-func (fr *FieldRules) FieldPtr() any { return fr.fieldPtr }
-
-// Tag returns the resolved JSON tag name for this field.
-func (fr *FieldRules) Tag() string { return fr.tag }
-
-// SetTag sets the resolved JSON tag name for this field.
-func (fr *FieldRules) SetTag(tag string) { fr.tag = tag }
-
-// RuleList returns the validation rules bound to this field.
-func (fr *FieldRules) RuleList() []Rule { return fr.rules }
-
 // Ruler is implemented by types that define validation rules for their fields.
 // Use a pointer receiver so field pointers are stable:
 //
@@ -71,10 +59,10 @@ type ContextRuler interface {
 	Rules(context.Context) []*FieldRules
 }
 
-// FindStructField returns the [reflect.StructField] whose address matches fieldValue
+// findStructField returns the reflect.StructField whose address matches fieldValue
 // within structValue. It recurses into anonymous (embedded) struct fields.
 // Returns nil if no match is found.
-func FindStructField(structValue reflect.Value, fieldValue reflect.Value) *reflect.StructField {
+func findStructField(structValue reflect.Value, fieldValue reflect.Value) *reflect.StructField {
 	ptr := fieldValue.Pointer()
 	for i := structValue.NumField() - 1; i >= 0; i-- {
 		sf := structValue.Type().Field(i)
@@ -92,7 +80,7 @@ func FindStructField(structValue reflect.Value, fieldValue reflect.Value) *refle
 				fi = fi.Elem()
 			}
 			if fi.Kind() == reflect.Struct {
-				if f := FindStructField(fi, fieldValue); f != nil {
+				if f := findStructField(fi, fieldValue); f != nil {
 					return f
 				}
 			}

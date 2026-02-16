@@ -233,7 +233,7 @@ func (b *rulerBridge) Validate(value any) error {
 // Embedded Ruler fields are expanded via expandFields for flat error keys.
 // A rulerBridge is appended to each field so ozzo recurses into Ruler children.
 func convertFieldRules(ctx context.Context, structPtr any, fields ...*FieldRules) []*validation.FieldRules {
-	flat := ExpandFields(ctx, structPtr, fields)
+	flat := expandFields(ctx, structPtr, fields)
 
 	vFields := make([]*validation.FieldRules, len(flat))
 	for i, fr := range flat {

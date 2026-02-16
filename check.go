@@ -31,7 +31,7 @@ func MissingRules(structPtr any, exclude ...string) []string {
 	}
 
 	// Expand embedded Ruler fields into flat list.
-	fields = ExpandFields(context.Background(), structPtr, fields)
+	fields = expandFields(context.Background(), structPtr, fields)
 
 	// Build set of covered field keys.
 	structVal := reflect.Indirect(reflect.ValueOf(structPtr))
@@ -41,7 +41,7 @@ func MissingRules(structPtr any, exclude ...string) []string {
 		if fv.Kind() != reflect.Ptr {
 			continue
 		}
-		sf := FindStructField(structVal, fv)
+		sf := findStructField(structVal, fv)
 		if sf == nil {
 			continue
 		}
