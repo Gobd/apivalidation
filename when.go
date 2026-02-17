@@ -8,7 +8,10 @@ import (
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
 
-type whenRule struct {
+// WhenRule validates conditionally: it applies one set of rules when the
+// condition is true, and an optional alternative set (via [WhenRule.Else])
+// when false. Use [When] to create one.
+type WhenRule struct {
 	validation.WhenRule
 	desc      string
 	whenRules []Rule
@@ -16,16 +19,17 @@ type whenRule struct {
 }
 
 // When returns a conditional validation rule that applies rules only when condition is true.
-func When(condition bool, desc string, rules ...Rule) *whenRule { //nolint:revive // unexported return enables .Else() chaining
-	return &whenRule{
-		validation.When(condition, convertRules(rules...)...),
-		desc,
-		rules,
-		nil,
+func When(condition bool, desc string, rules ...Rule) *WhenRule {
+	return &WhenRule{
+		WhenRule:  validation.When(condition, convertRules(rules...)...),
+		desc:      desc,
+		whenRules: rules,
+		elseRules: nil,
 	}
 }
 
-func (r *whenRule) Else(rules ...Rule) *whenRule {
+// Else specifies alternative rules to apply when the [When] condition is false.
+func (r *WhenRule) Else(rules ...Rule) *WhenRule {
 	r.elseRules = rules
 	return r
 }
@@ -74,7 +78,9 @@ func describeRules(name string, rules []Rule) (string, error) {
 	return strings.Join(parts, ", "), nil
 }
 
-func (r *whenRule) Describe(name string, _ *openapi3.Schema, ref *openapi3.SchemaRef) error {
+// Describe implements [Rule] by appending a human-readable summary of the
+// conditional rules to the schema description.
+func (r *WhenRule) Describe(name string, _ *openapi3.Schema, ref *openapi3.SchemaRef) error {
 	if len(r.whenRules) > 0 {
 		desc, err := describeRules(name, r.whenRules)
 		if err != nil {

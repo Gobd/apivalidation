@@ -2,9 +2,7 @@ package apivalidation
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"reflect"
 	"strings"
 
@@ -30,7 +28,6 @@ func titleFirst(s string) string {
 }
 
 // getRulesForType returns validation rules for t if it implements Ruler or ContextRuler.
-// The struct pointer is derived from reflect.New(t), so Rules() no longer needs to return it.
 func getRulesForType(t reflect.Type) (any, []*FieldRules) {
 	inst := reflect.New(t)
 	if r, ok := inst.Interface().(Ruler); ok {
@@ -78,7 +75,6 @@ func mapFieldsToTags(fields []*FieldRules, structVal reflect.Value) error {
 			return fmt.Errorf("rule target for field index %d not found in struct %s", i, structVal.Type())
 		}
 		if sf.Anonymous {
-			// Embedded fields are handled by recursion, not direct rule application.
 			fields[i].tag = ""
 			continue
 		}
@@ -159,167 +155,10 @@ func applyValueRulerSchema(t reflect.Type, name string, schema *openapi3.Schema)
 	return nil
 }
 
-// Response describes an HTTP response with a description and body types for schema generation.
-type Response struct {
-	Desc string
-	V    []any
-}
-
-// NewRequestMust is like NewRequest but panics on error.
-func NewRequestMust(vs ...any) *openapi3.RequestBodyRef {
-	o, err := NewRequest(vs...)
-	if err != nil {
-		panic(err)
-	}
-	return o
-}
-
-// NewRequest generates an OpenAPI request body schema from the given value types.
-func NewRequest(vs ...any) (*openapi3.RequestBodyRef, error) {
-	if len(vs) == 0 {
-		return nil, errors.New("no values given")
-	}
-
-	base := &openapi3.RequestBodyRef{
-		Value: &openapi3.RequestBody{
-			Content: openapi3.Content{
-				"application/json": &openapi3.MediaType{
-					Schema: &openapi3.SchemaRef{
-						Value: &openapi3.Schema{
-							OneOf: openapi3.SchemaRefs{},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	wrapper := base.Value.Content["application/json"].Schema
-	for i := range vs {
-		schema, err := newSchemaRefForValue(vs[i])
-		if err != nil {
-			return nil, err
-		}
-		wrapper.Value.OneOf = append(wrapper.Value.OneOf, schema)
-	}
-
-	if len(wrapper.Value.OneOf) == 1 {
-		base.Value.Content["application/json"].Schema = wrapper.Value.OneOf[0]
-	}
-
-	return base, nil
-}
-
-// NewResponseMust is like NewResponse but panics on error.
-// Map key is status code (e.g. "200", "4xx").
-func NewResponseMust(vs map[string]Response) *openapi3.Responses {
-	o, err := NewResponse(vs)
-	if err != nil {
-		panic(err)
-	}
-	return o
-}
-
-// NewResponse creates an OpenAPI responses object.
-// Map key is status code (e.g. "200", "4xx").
-func NewResponse(vs map[string]Response) (*openapi3.Responses, error) {
-	if len(vs) == 0 {
-		return nil, errors.New("no values given")
-	}
-
-	opts := make([]openapi3.NewResponsesOption, 0, len(vs))
-
-	for statusCode := range vs {
-		desc := vs[statusCode].Desc
-
-		var refs openapi3.SchemaRefs
-
-		for k := range vs[statusCode].V {
-			schema, err := newSchemaRefForValue(vs[statusCode].V[k])
-			if err != nil {
-				return nil, err
-			}
-			refs = append(refs, schema)
-		}
-
-		content := openapi3.Content{
-			"application/json": &openapi3.MediaType{
-				Schema: &openapi3.SchemaRef{
-					Value: &openapi3.Schema{
-						OneOf: refs,
-					},
-				},
-			},
-		}
-
-		if len(refs) == 1 {
-			content["application/json"].Schema = refs[0]
-		}
-
-		opt := openapi3.WithName(statusCode, &openapi3.Response{
-			Description: &desc,
-			Content:     content,
-		})
-		opts = append(opts, opt)
-	}
-
-	return openapi3.NewResponses(opts...), nil
-}
-
-// newSchemaRefForValue generates an OpenAPI schema for the given value,
-// applying validation rules from types that implement Ruler, ContextRuler, or ValueRuler.
-func newSchemaRefForValue(value any) (*openapi3.SchemaRef, error) {
+// NewSchemaRefForValue generates an OpenAPI schema for the given value,
+// applying validation rules from types that implement [Ruler],
+// [ContextRuler], or [ValueRuler].
+func NewSchemaRefForValue(value any) (*openapi3.SchemaRef, error) {
 	g := openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(schemaDoc(value)))
 	return g.NewSchemaRefForValue(value, nil)
-}
-
-// Ruler is implemented by types that define validation rules for their fields.
-// Use a pointer receiver so field pointers are stable:
-//
-//	func (s *MyStruct) Rules() []*FieldRules {
-//	    return []*FieldRules{Field(&s.Name, Required)}
-//	}
-type Ruler interface {
-	Rules() []*FieldRules
-}
-
-// ContextRuler is like Ruler but receives a context (for conditional rules).
-type ContextRuler interface {
-	Rules(context.Context) []*FieldRules
-}
-
-// DocBase returns a basic OpenAPI 3.0.3 document structure.
-func DocBase(serviceName, description, version string) *openapi3.T {
-	return &openapi3.T{
-		OpenAPI: "3.0.3",
-		Info: &openapi3.Info{
-			Title:       serviceName,
-			Description: description,
-			Version:     version,
-		},
-		Paths: &openapi3.Paths{},
-	}
-}
-
-// AddPath adds an operation to the OpenAPI spec at the given path and method.
-func AddPath(path, method string, s *openapi3.T, op *openapi3.Operation) {
-	p := s.Paths.Value(path)
-	if p == nil {
-		p = &openapi3.PathItem{}
-	}
-
-	switch method {
-	case http.MethodGet:
-		p.Get = op
-	case http.MethodPost:
-		p.Post = op
-	case http.MethodPut:
-		p.Put = op
-	case http.MethodPatch:
-		p.Patch = op
-	case http.MethodDelete:
-		p.Delete = op
-	}
-
-	s.Paths.Set(path, p)
 }

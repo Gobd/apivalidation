@@ -3,11 +3,10 @@ package apivalidation
 import (
 	"context"
 	"reflect"
-	"strings"
 )
 
 // Normalizer is implemented by types that need custom normalization after unmarshaling.
-// Called by UnmarshalAndValidate before validation. When the top-level type implements
+// Called by [UnmarshalAndValidate] before validation. When the top-level type implements
 // Normalizer, normalization recurses into struct fields, slices, maps, and embedded
 // structs, calling Normalize on any nested type that also implements it.
 // Top level is always called first, then children depth-first.
@@ -15,8 +14,8 @@ type Normalizer interface {
 	Normalize()
 }
 
-// ContextNormalizer is like Normalizer but receives a context.
-// Called by UnmarshalAndValidateCtx before validation.
+// ContextNormalizer is like [Normalizer] but receives a context.
+// Called by [UnmarshalAndValidateCtx] before validation.
 type ContextNormalizer interface {
 	Normalize(context.Context)
 }
@@ -95,96 +94,6 @@ func walkNormalize(ctx context.Context, rv reflect.Value) { //nolint:revive // r
 					callNormalize(ctx, cp.Interface())
 					walkNormalize(ctx, cp.Elem())
 					field.SetMapIndex(key, cp.Elem())
-				}
-			}
-		}
-	}
-}
-
-// StructTrimSpace runs strings.TrimSpace on all string fields in the struct recursively,
-// including nested structs, pointer fields, slices, and map values.
-func StructTrimSpace(v any) {
-	structStringFunc(v, strings.TrimSpace)
-}
-
-// StructToLower runs strings.ToLower on all string fields in the struct recursively.
-func StructToLower(v any) {
-	structStringFunc(v, strings.ToLower)
-}
-
-// StructStringFunc applies f to every string field in the struct recursively.
-func StructStringFunc(v any, f func(string) string) {
-	structStringFunc(v, f)
-}
-
-// StructMulti runs all given functions on the struct pointer sequentially.
-func StructMulti(v any, fns ...func(any)) {
-	for _, f := range fns {
-		f(v)
-	}
-}
-
-func structStringFunc(a any, f func(string) string) { //nolint:revive // reflection walker is inherently complex
-	v := reflect.ValueOf(a)
-	if v.Kind() == reflect.Pointer {
-		v = v.Elem()
-	}
-	if v.Kind() != reflect.Struct {
-		return
-	}
-	for i := range v.NumField() {
-		field := v.Field(i)
-		if !field.CanSet() {
-			continue
-		}
-		switch field.Kind() {
-		case reflect.String:
-			field.SetString(f(field.String()))
-		case reflect.Struct:
-			structStringFunc(field.Addr().Interface(), f)
-		case reflect.Ptr:
-			if field.IsNil() {
-				continue
-			}
-			switch field.Elem().Kind() {
-			case reflect.String:
-				field.Elem().SetString(f(field.Elem().String()))
-			case reflect.Struct:
-				structStringFunc(field.Interface(), f)
-			}
-		case reflect.Interface:
-			// Skip interface fields — concrete type is unknown at compile time
-			// and modifying them via reflect can cause subtle bugs.
-		case reflect.Slice:
-			for j := range field.Len() {
-				elem := field.Index(j)
-				switch elem.Kind() {
-				case reflect.String:
-					elem.SetString(f(elem.String()))
-				case reflect.Struct:
-					structStringFunc(elem.Addr().Interface(), f)
-				case reflect.Ptr:
-					if !elem.IsNil() {
-						switch elem.Elem().Kind() {
-						case reflect.String:
-							elem.Elem().SetString(f(elem.Elem().String()))
-						case reflect.Struct:
-							structStringFunc(elem.Interface(), f)
-						}
-					}
-				}
-			}
-		case reflect.Map:
-			for _, key := range field.MapKeys() {
-				val := field.MapIndex(key)
-				switch val.Kind() {
-				case reflect.String:
-					field.SetMapIndex(key, reflect.ValueOf(f(val.String())))
-				case reflect.Struct:
-					cp := reflect.New(val.Type()).Elem()
-					cp.Set(val)
-					structStringFunc(cp.Addr().Interface(), f)
-					field.SetMapIndex(key, cp)
 				}
 			}
 		}

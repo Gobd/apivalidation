@@ -49,6 +49,9 @@ func UnmarshalAndValidateCtx(ctx context.Context, b []byte, dst any) error {
 	return ValidateCtx(ctx, dst)
 }
 
+// DecodeAndValidate reads JSON from r into dst using a streaming decoder,
+// then normalizes and validates. Use this instead of [UnmarshalAndValidate]
+// when reading directly from an [io.Reader] such as an HTTP request body.
 func DecodeAndValidate(r io.Reader, dst any) error {
 	return DecodeAndValidateContext(context.Background(), r, dst)
 }
