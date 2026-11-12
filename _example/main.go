@@ -1,24 +1,20 @@
-// Command example demonstrates apivalidation with an HTTP server serving
-// a Swagger UI and a validated JSON endpoint.
-//
-// Run:
-//
-//	go run ./_example
-//
-// Then open http://localhost:8080/swagger/ in your browser.
+// Command example demonstrates documented routes using a standard http.ServeMux.
+// Run: go run ./_example
+// Browse: http://localhost:8080/swagger/
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	v "github.com/Gobd/apivalidation"
 	"github.com/Gobd/apivalidation/openapi"
 )
 
-// Order is a sample request/response type.
 type Order struct {
 	CustomerName string  `json:"customer_name"`
 	ItemCount    int     `json:"item_count"`
@@ -33,48 +29,43 @@ func (o *Order) Rules() []*v.FieldRules {
 	}
 }
 
-// ErrorResponse is a standard error envelope.
+func (o *Order) Normalize() { o.CustomerName = strings.TrimSpace(o.CustomerName) }
+
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
 func main() {
-	// Build the OpenAPI spec.
 	doc := openapi.DocBase("Example API", "Demonstrates apivalidation", "0.1.0")
+	mux := http.NewServeMux()
+	routes := openapi.NewRoutes(doc, func(method, path string, h http.Handler) {
+		mux.Handle(method+" "+path, h)
+	})
 
-	openapi.Post(doc, "/orders", "createOrder", openapi.Endpoint{
-		Summary:  "Create an order",
-		Request:  Order{},
-		Response: Order{},
+	// Register the actual handler and its documentation in one call.
+	routes.HandleFunc(http.MethodPost, "/orders", "createOrder", openapi.Endpoint{
+		Summary: "Create an order",
+		Request: Order{},
 		Responses: map[string]openapi.Response{
 			"200": {Desc: "Created order", Bodies: []any{Order{}}},
-			"400": {Desc: "Validation error", Bodies: []any{ErrorResponse{}}},
+			"400": {Desc: "Invalid request", Bodies: []any{ErrorResponse{}}},
 		},
-	})
-
-	// Swagger UI
-	http.Handle("/swagger/", openapi.SwaggerHandlerMust("/swagger/", doc))
-
-	// API endpoint
-	http.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
+	}, func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		var order Order
-		if err := v.DecodeAndValidate(r.Body, &order); err != nil {
+		if err := v.DecodeAndValidateContext(r.Context(), r.Body, &order); err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(ErrorResponse{Error: err.Error()})
+			_ = json.MarshalWrite(w, ErrorResponse{Error: err.Error()})
 			return
 		}
-
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(order)
+		_ = json.MarshalWrite(w, order)
 	})
 
-	fmt.Println("Listening on http://localhost:8080")
-	fmt.Println("Swagger UI: http://localhost:8080/swagger/")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Build Swagger after registering all documented routes.
+	mux.Handle("/swagger/", openapi.SwaggerHandlerMust("/swagger/", doc))
+	server := &http.Server{Addr: ":8080", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	fmt.Println("Listening on http://localhost:8080; Swagger UI: /swagger/")
+	log.Fatal(server.ListenAndServe())
 }

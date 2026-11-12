@@ -16,7 +16,34 @@ var Required = requiredRule{
 	"required",
 }
 
-func (r requiredRule) Describe(name string, schema *openapi3.Schema, _ *openapi3.SchemaRef) error {
-	schema.Required = append(schema.Required, name)
+func (r requiredRule) Describe(name string, schema *openapi3.Schema, ref *openapi3.SchemaRef) error {
+	if name != "" && schema != ref.Value {
+		ref.Value.Nullable = false
+		for _, existing := range schema.Required {
+			if existing == name {
+				return nil
+			}
+		}
+		schema.Required = append(schema.Required, name)
+	} else {
+		// ValueRuler and Each rules describe a value, not an object property.
+		if name == "" {
+			ref.Value.Nullable = false
+		}
+		switch {
+		case ref.Value.Type.Is(openapi3.TypeString):
+			if ref.Value.MinLength == 0 {
+				ref.Value.MinLength = 1
+			}
+		case ref.Value.Type.Is(openapi3.TypeArray):
+			if ref.Value.MinItems == 0 {
+				ref.Value.MinItems = 1
+			}
+		case ref.Value.Type.Is(openapi3.TypeObject):
+			if ref.Value.MinProps == 0 {
+				ref.Value.MinProps = 1
+			}
+		}
+	}
 	return nil
 }

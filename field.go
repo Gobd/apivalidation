@@ -3,6 +3,7 @@ package apivalidation
 import (
 	"context"
 	"reflect"
+	"strings"
 )
 
 // Field creates a FieldRules binding a struct field pointer to its validation rules.
@@ -18,15 +19,21 @@ func Field[T any](fieldPtr *T, rules ...Rule) *FieldRules {
 // recursively, so error keys and schema properties are flat (not nested under the embedded name).
 func expandFields(ctx context.Context, structPtr any, fields []*FieldRules) []*FieldRules {
 	structVal := reflect.Indirect(reflect.ValueOf(structPtr))
-	if !structVal.IsValid() || structVal.Kind() != reflect.Struct {
+	if !structVal.IsValid() || structVal.Kind() != reflect.Struct || !structVal.CanAddr() {
 		return fields
 	}
 
 	result := make([]*FieldRules, 0, len(fields))
 	for _, fr := range fields {
+		if fr == nil {
+			result = append(result, fr)
+			continue
+		}
 		fv := reflect.ValueOf(fr.fieldPtr)
-		if fv.Kind() == reflect.Ptr {
-			if sf := findStructField(structVal, fv); sf != nil && sf.Anonymous {
+		// Scalar fields cannot be embedded Rulers, so avoid scanning the parent
+		// for them. This is the common path for most API request rules.
+		if fv.Kind() == reflect.Ptr && !fv.IsNil() && fv.Elem().Kind() == reflect.Struct {
+			if sf := findStructField(structVal, fv); sf != nil && sf.Anonymous && strings.Split(sf.Tag.Get("json"), ",")[0] == "" {
 				embeddedPtr := fv.Interface()
 				if r, ok := embeddedPtr.(Ruler); ok {
 					result = append(result, expandFields(ctx, embeddedPtr, r.Rules())...)

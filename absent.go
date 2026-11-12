@@ -8,21 +8,35 @@ import (
 )
 
 // Nil is a validation rule that checks if a value is nil.
-var Nil = absentRule{validation.Nil, false}
+var Nil = absentRule{Rule: validation.Nil}
 
 // Empty checks if a not nil value is empty.
-var Empty = absentRule{validation.Empty, true}
+var Empty = absentRule{Rule: validation.Empty, skipNil: true}
 
 type absentRule struct {
 	validation.Rule
-	skipNil bool
+	skipNil  bool
+	disabled bool
 }
 
-func (r absentRule) When(_ bool) absentRule {
+// When enables this rule only when condition is true. Use the top-level When
+// helper to also document a human-readable condition and alternative rules.
+func (r absentRule) When(condition bool) absentRule {
+	r.disabled = !condition
 	return r
 }
 
+func (r absentRule) Validate(value any) error {
+	if r.disabled {
+		return nil
+	}
+	return r.Rule.Validate(value)
+}
+
 func (r absentRule) Describe(_ string, _ *openapi3.Schema, ref *openapi3.SchemaRef) error {
+	if r.disabled {
+		return nil
+	}
 	if ref.Value.Description != "" && !strings.HasSuffix(ref.Value.Description, " ") {
 		ref.Value.Description += " "
 	}

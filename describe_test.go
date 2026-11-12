@@ -71,15 +71,15 @@ func TestDescribe_Max(t *testing.T) {
 }
 
 func TestDescribe_MinMax_StringType(t *testing.T) {
-	// When the ref is a string type, DescNew sets the Format field
+	// Numeric string bounds are described, not emitted as numeric keywords.
 	schema, ref := newTestStringSchemaRef()
 
 	err := Min(0.0).Describe("amount", schema, ref)
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, ref.Value.Format)
-	require.NotNil(t, ref.Value.Min)
-	assert.Equal(t, float64(0), *ref.Value.Min)
+	assert.Empty(t, ref.Value.Format)
+	assert.Nil(t, ref.Value.Min)
+	assert.Equal(t, "numeric value >= 0", ref.Value.Description)
 }
 
 func TestDescribe_Length(t *testing.T) {
@@ -88,10 +88,11 @@ func TestDescribe_Length(t *testing.T) {
 	err := Length(3, 255).Describe("title", schema, ref)
 	require.NoError(t, err)
 
-	require.NotNil(t, ref.Value.Min)
-	require.NotNil(t, ref.Value.Max)
-	assert.Equal(t, float64(3), *ref.Value.Min)
-	assert.Equal(t, float64(255), *ref.Value.Max)
+	assert.Nil(t, ref.Value.Min)
+	assert.Nil(t, ref.Value.Max)
+	assert.Equal(t, uint64(3), ref.Value.MinLength)
+	require.NotNil(t, ref.Value.MaxLength)
+	assert.Equal(t, uint64(255), *ref.Value.MaxLength)
 }
 
 func TestDescribe_In(t *testing.T) {
@@ -105,23 +106,25 @@ func TestDescribe_In(t *testing.T) {
 
 func TestDescribe_Each_SingleRule(t *testing.T) {
 	schema, ref := newTestSchemaRef()
+	ref.Value = openapi3.NewArraySchema().WithItems(openapi3.NewStringSchema())
 
-	// Each with a single rule should apply that rule
 	err := Each(In("x", "y")).Describe("tags", schema, ref)
 	require.NoError(t, err)
 
-	assert.Equal(t, []any{"x", "y"}, ref.Value.Enum)
+	assert.Empty(t, ref.Value.Enum)
+	assert.Equal(t, []any{"x", "y"}, ref.Value.Items.Value.Enum)
 }
 
 func TestDescribe_Each_MultipleRules(t *testing.T) {
 	schema, ref := newTestSchemaRef()
+	ref.Value = openapi3.NewArraySchema().WithItems(openapi3.NewStringSchema())
 
 	err := Each(Required, In("x", "y")).Describe("tags", schema, ref)
 	require.NoError(t, err)
 
-	// All rules should be applied
-	assert.Contains(t, schema.Required, "tags")
-	assert.Equal(t, []any{"x", "y"}, ref.Value.Enum)
+	assert.Empty(t, schema.Required)
+	assert.Equal(t, uint64(1), ref.Value.Items.Value.MinLength)
+	assert.Equal(t, []any{"x", "y"}, ref.Value.Items.Value.Enum)
 }
 
 func TestDescribe_Unique(t *testing.T) {
@@ -130,7 +133,8 @@ func TestDescribe_Unique(t *testing.T) {
 	err := Unique(func(i int) any { return i }, "unique items").Describe("items", schema, ref)
 	require.NoError(t, err)
 
-	assert.True(t, ref.Value.UniqueItems)
+	assert.False(t, ref.Value.UniqueItems)
+	assert.Equal(t, "unique items", ref.Value.Description)
 }
 
 func TestDescribe_Date_Basic(t *testing.T) {
@@ -139,7 +143,7 @@ func TestDescribe_Date_Basic(t *testing.T) {
 	err := Date("2006-01-02").Describe("dob", schema, ref)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2006-01-02", ref.Value.Format)
+	assert.Equal(t, "date", ref.Value.Format)
 }
 
 func TestDescribe_Date_WithMinMax(t *testing.T) {
@@ -151,9 +155,9 @@ func TestDescribe_Date_WithMinMax(t *testing.T) {
 	err := Date("2006-01-02").Min(minTime).Max(maxTime).Describe("eventDate", schema, ref)
 	require.NoError(t, err)
 
-	assert.Equal(t, "2006-01-02", ref.Value.Format)
-	assert.Contains(t, ref.Value.Description, "> "+minTime.String())
-	assert.Contains(t, ref.Value.Description, "< "+maxTime.String())
+	assert.Equal(t, "date", ref.Value.Format)
+	assert.Contains(t, ref.Value.Description, ">= "+minTime.Format(time.DateOnly))
+	assert.Contains(t, ref.Value.Description, "<= "+maxTime.Format(time.DateOnly))
 }
 
 func TestDescribe_When_WithRules(t *testing.T) {
@@ -173,6 +177,24 @@ func TestDescribe_When_WithElse(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "when is admin: required else: one of [guest, viewer]", ref.Value.Description)
+}
+
+func TestDescribe_When_Each(t *testing.T) {
+	schema, ref := newTestSchemaRef()
+	ref.Value = openapi3.NewArraySchema().WithItems(openapi3.NewStringSchema())
+	err := When(true, "active", Each(Required, Length(1, 4), In("a", "b"))).Describe("tags", schema, ref)
+	require.NoError(t, err)
+	assert.Contains(t, ref.Value.Description, "when active: each: required")
+	assert.Contains(t, ref.Value.Description, "min length 1")
+	assert.Contains(t, ref.Value.Description, "one of [a, b]")
+	assert.Empty(t, schema.Required)
+	assert.Empty(t, ref.Value.Items.Value.Enum)
+}
+
+func TestDescribe_When_DateFormat(t *testing.T) {
+	schema, ref := newTestSchemaRef()
+	require.NoError(t, When(true, "active", Date(time.DateOnly)).Describe("date", schema, ref))
+	assert.Equal(t, "when active: format date", ref.Value.Description)
 }
 
 func TestDescribe_When_WithNil(t *testing.T) {

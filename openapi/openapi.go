@@ -14,10 +14,11 @@ type Response struct {
 }
 
 // Endpoint describes a single API operation for the convenience helpers
-// [Get], [Post], [Put], [Patch], and [Delete].
+// [Get], [Post], [Put], [Patch], [Delete], and [Query].
 type Endpoint struct {
 	Summary     string
 	Description string
+	Parameters  openapi3.Parameters // explicit path, query, header, or cookie parameters
 	Request     any                 // single request body type (convenience)
 	Requests    []any               // multiple request body types (oneOf)
 	Response    any                 // single 200 response type (convenience)
@@ -70,7 +71,7 @@ func NewRequest(vs ...any) (*openapi3.RequestBodyRef, error) {
 }
 
 // NewResponseMust is like [NewResponse] but panics on error.
-// Map key is status code (e.g. "200", "4xx").
+// Map key is a status code or range (e.g. "200", "4XX"), or "default".
 func NewResponseMust(vs map[string]Response) *openapi3.Responses {
 	o, err := NewResponse(vs)
 	if err != nil {
@@ -80,7 +81,8 @@ func NewResponseMust(vs map[string]Response) *openapi3.Responses {
 }
 
 // NewResponse creates an OpenAPI responses object.
-// Map key is status code (e.g. "200", "4xx").
+// Map key is a status code or range (e.g. "200", "4XX"), or "default".
+// Responses without Bodies have no content schema.
 func NewResponse(vs map[string]Response) (*openapi3.Responses, error) {
 	if len(vs) == 0 {
 		return nil, errors.New("no values given")
@@ -115,6 +117,10 @@ func NewResponse(vs map[string]Response) (*openapi3.Responses, error) {
 			content["application/json"].Schema = refs[0]
 		}
 
+		// A response without body types has no content (e.g. 204 No Content).
+		if len(refs) == 0 {
+			content = nil
+		}
 		opt := openapi3.WithName(statusCode, &openapi3.Response{
 			Description: &desc,
 			Content:     content,
@@ -139,34 +145,33 @@ func DocBase(serviceName, description, version string) *openapi3.T {
 }
 
 // AddPath adds an operation to the OpenAPI spec at the given path and method.
+// QUERY and custom methods require doc.OpenAPI to be "3.2.0" or later. Method
+// names are case-sensitive. Validate the completed document before serving it.
 func AddPath(path, method string, s *openapi3.T, op *openapi3.Operation) {
+	if s.Paths == nil {
+		s.Paths = &openapi3.Paths{}
+	}
 	p := s.Paths.Value(path)
 	if p == nil {
 		p = &openapi3.PathItem{}
 	}
 
-	switch method {
-	case http.MethodGet:
-		p.Get = op
-	case http.MethodPost:
-		p.Post = op
-	case http.MethodPut:
-		p.Put = op
-	case http.MethodPatch:
-		p.Patch = op
-	case http.MethodDelete:
-		p.Delete = op
-	}
+	p.SetOperation(method, op)
 
 	s.Paths.Set(path, p)
 }
 
 // addEndpoint builds an [openapi3.Operation] from ep and registers it at path+method.
 func addEndpoint(doc *openapi3.T, path, method, operationID string, ep Endpoint) {
+	AddPath(path, method, doc, operationForEndpoint(operationID, ep))
+}
+
+func operationForEndpoint(operationID string, ep Endpoint) *openapi3.Operation {
 	op := &openapi3.Operation{
 		OperationID: operationID,
 		Summary:     ep.Summary,
 		Description: ep.Description,
+		Parameters:  ep.Parameters,
 	}
 
 	// Request body
@@ -187,10 +192,10 @@ func addEndpoint(doc *openapi3.T, path, method, operationID string, ep Endpoint)
 	if responses != nil {
 		op.Responses = NewResponseMust(responses)
 	} else {
-		op.Responses = openapi3.NewResponses()
+		op.Responses = NewResponseMust(map[string]Response{"200": {Desc: "OK"}})
 	}
 
-	AddPath(path, method, doc, op)
+	return op
 }
 
 // Get registers a GET endpoint on doc.
@@ -211,6 +216,13 @@ func Put(doc *openapi3.T, path, operationID string, ep Endpoint) {
 // Patch registers a PATCH endpoint on doc.
 func Patch(doc *openapi3.T, path, operationID string, ep Endpoint) {
 	addEndpoint(doc, path, http.MethodPatch, operationID, ep)
+}
+
+// Query registers an HTTP QUERY endpoint on doc. QUERY is a safe, idempotent
+// method with a request body. Set doc.OpenAPI = "3.2.0" before validating or
+// serving the document; OpenAPI 3.0 and 3.1 cannot represent it.
+func Query(doc *openapi3.T, path, operationID string, ep Endpoint) {
+	addEndpoint(doc, path, openapi3.MethodQuery, operationID, ep)
 }
 
 // Delete registers a DELETE endpoint on doc.

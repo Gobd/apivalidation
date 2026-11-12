@@ -6,12 +6,37 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [".", "_example/chi", "_example/gorilla"]
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
     steps:
-      - uses: actions/checkout@v6.0.2
-      - uses: actions/setup-go@v6.2.0
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
         with:
-          go-version-file: go.mod
-      - run: go test ./...
+          go-version-file: ${{ matrix.module }}/go.mod
+          cache-dependency-path: ${{ matrix.module }}/go.sum
+      - name: Check gofumpt formatting
+        run: |
+          unformatted="$(go run mvdan.cc/gofumpt@v0.12.0 -l .)"
+          test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+      - if: matrix.module == '.'
+        run: |
+          unformatted="$(go run mvdan.cc/gofumpt@v0.12.0 -l ./_example/main.go)"
+          test -z "$unformatted" || { printf '%s\n' "$unformatted"; exit 1; }
+      - run: go mod tidy -diff
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - run: go build ./...
+      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - if: matrix.module == '.'
+        run: go test ./_example && go build -o /tmp/apivalidation-example ./_example
