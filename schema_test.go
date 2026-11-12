@@ -246,13 +246,14 @@ func TestSchema_BasicStruct(t *testing.T) {
 	assert.Equal(t, float64(0), *ageProp.Value.Min)
 	assert.Equal(t, float64(150), *ageProp.Value.Max)
 
-	// Length on name sets min/max
+	// String lengths use OpenAPI length keywords, never numeric bounds.
 	nameProp := schema.Properties["name"]
 	require.NotNil(t, nameProp.Value)
-	assert.NotNil(t, nameProp.Value.Min)
-	assert.NotNil(t, nameProp.Value.Max)
-	assert.Equal(t, float64(1), *nameProp.Value.Min)
-	assert.Equal(t, float64(100), *nameProp.Value.Max)
+	assert.Nil(t, nameProp.Value.Min)
+	assert.Nil(t, nameProp.Value.Max)
+	assert.Equal(t, uint64(1), nameProp.Value.MinLength)
+	require.NotNil(t, nameProp.Value.MaxLength)
+	assert.Equal(t, uint64(100), *nameProp.Value.MaxLength)
 }
 
 func TestSchema_Enum(t *testing.T) {

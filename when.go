@@ -31,6 +31,7 @@ func When(condition bool, desc string, rules ...Rule) *WhenRule {
 // Else specifies alternative rules to apply when the [When] condition is false.
 func (r *WhenRule) Else(rules ...Rule) *WhenRule {
 	r.elseRules = rules
+	r.WhenRule = r.WhenRule.Else(convertRules(rules...)...)
 	return r
 }
 
@@ -45,6 +46,21 @@ func describeRules(name string, rules []Rule) (string, error) {
 	ref := &openapi3.SchemaRef{Value: openapi3.NewSchema()}
 
 	for _, r := range rules {
+		if each, ok := r.(*eachRule); ok {
+			// There is no concrete collection schema in this prose-only pass.
+			// Describe element rules recursively rather than guessing a type.
+			inner, err := describeRules(name, each.rules)
+			if err != nil {
+				return "", err
+			}
+			if inner != "" {
+				if ref.Value.Description != "" {
+					ref.Value.Description += " "
+				}
+				ref.Value.Description += "each: " + inner
+			}
+			continue
+		}
 		if err := r.Describe(name, schema, ref); err != nil {
 			return "", err
 		}
@@ -63,6 +79,15 @@ func describeRules(name string, rules []Rule) (string, error) {
 	}
 	if ref.Value.Max != nil {
 		parts = append(parts, fmt.Sprintf("max %g", *ref.Value.Max))
+	}
+	if ref.Value.MinLength > 0 {
+		parts = append(parts, fmt.Sprintf("min length %d", ref.Value.MinLength))
+	}
+	if ref.Value.MaxLength != nil {
+		parts = append(parts, fmt.Sprintf("max length %d", *ref.Value.MaxLength))
+	}
+	if ref.Value.Format != "" {
+		parts = append(parts, "format "+ref.Value.Format)
 	}
 	if len(ref.Value.Enum) > 0 {
 		vals := make([]string, len(ref.Value.Enum))

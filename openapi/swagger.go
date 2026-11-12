@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"fmt"
+	"html/template"
 	"io/fs"
 	"net/http"
-	"text/template"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 )
@@ -19,6 +21,12 @@ var swagFS embed.FS
 //
 //	http.Handle("/swagger/", openapi.SwaggerHandlerMust("/swagger/", spec))
 func SwaggerHandler(prefix string, s *openapi3.T) (http.Handler, error) {
+	if s == nil {
+		return nil, fmt.Errorf("OpenAPI document must not be nil")
+	}
+	if prefix != "" && !strings.HasPrefix(prefix, "/") {
+		return nil, fmt.Errorf("Swagger prefix must start with /: %q", prefix)
+	}
 	if err := s.Validate(context.Background()); err != nil {
 		return nil, err
 	}
@@ -45,9 +53,10 @@ func SwaggerHandler(prefix string, s *openapi3.T) (http.Handler, error) {
 	}
 	files := http.FileServer(http.FS(static))
 
-	return http.StripPrefix(prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return http.StripPrefix(strings.TrimSuffix(prefix, "/"), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "", "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			_, _ = w.Write(index)
 		case "/docs.json":
 			w.Header().Set("Content-Type", "application/json")

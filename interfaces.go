@@ -20,7 +20,6 @@ type (
 	// FieldRules binds a struct field pointer to its validation rules.
 	FieldRules struct {
 		fieldPtr any
-		tag      string
 		rules    []Rule
 	}
 
@@ -63,6 +62,10 @@ type ContextRuler interface {
 // within structValue. It recurses into anonymous (embedded) struct fields.
 // Returns nil if no match is found.
 func findStructField(structValue reflect.Value, fieldValue reflect.Value) *reflect.StructField {
+	if !structValue.IsValid() || structValue.Kind() != reflect.Struct || !structValue.CanAddr() ||
+		!fieldValue.IsValid() || fieldValue.Kind() != reflect.Ptr || fieldValue.IsNil() {
+		return nil
+	}
 	ptr := fieldValue.Pointer()
 	for i := structValue.NumField() - 1; i >= 0; i-- {
 		sf := structValue.Type().Field(i)

@@ -10,7 +10,7 @@ import (
 	"unicode"
 
 	"github.com/Gobd/apivalidation"
-	"github.com/asaskevich/govalidator"
+	"github.com/asaskevich/govalidator/v12"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
 )
 
@@ -128,8 +128,8 @@ var (
 var (
 	// Email validates if a string is an email or not. It also checks if the MX record exists for the email domain.
 	Email = apivalidation.NewStringRuleWithError(govalidator.IsExistingEmail, ErrEmail, "must be email address with mx record")
-	// // EmailFormat validates if a string is an email or not. Note that it does NOT check if the MX record exists or not.
-	// EmailFormat = apivalidation.NewStringRuleWithError(govalidator.IsEmail, ErrEmail)
+	// EmailFormat validates email syntax without performing network I/O.
+	EmailFormat = apivalidation.NewStringRuleWithError(govalidator.IsEmail, ErrEmail, "must be a valid email address")
 	// // URL validates if a string is a valid URL
 	// URL = apivalidation.NewStringRuleWithError(govalidator.IsURL, ErrURL)
 	// // RequestURL validates if a string is a valid request URL
@@ -247,7 +247,7 @@ var (
 	// Domain regex source: https://stackoverflow.com/a/7933253
 	// Slightly modified: Removed 255 max length validation since Go regex does not
 	// support lookarounds. More info: https://stackoverflow.com/a/38935027
-	reDomain = regexp.MustCompile(`^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-zA-Z]{1,63}| xn--[a-z0-9]{1,59})$`)
+	reDomain = regexp.MustCompile(`(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{1,63}|xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?)$`)
 )
 
 func isISBN(value string) bool {

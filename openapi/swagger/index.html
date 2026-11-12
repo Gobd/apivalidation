@@ -14,7 +14,7 @@
     <script src="./swagger-ui-standalone-preset.js" charset="UTF-8"> </script>
     <script>
       window.ui = SwaggerUIBundle({
-        spec: {{.Docs}},
+        spec: JSON.parse({{.Docs}}),
         dom_id: '#swagger-ui',
         deepLinking: true,
         defaultModelsExpandDepth: 100,

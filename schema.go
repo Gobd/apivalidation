@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -18,16 +19,8 @@ func indirect(v any) reflect.Value {
 	return rv
 }
 
-// titleFirst uppercases the first byte of s.
-// Used to convert JSON field names (e.g. "name") to Go field names ("Name").
-func titleFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToUpper(s[:1]) + s[1:]
-}
-
-// getRulesForType returns validation rules for t if it implements Ruler or ContextRuler.
+// Rules are constructed from fresh values, not the caller's instance: schemas
+// must not depend on whether a particular request happens to be valid.
 func getRulesForType(t reflect.Type) (any, []*FieldRules) {
 	inst := reflect.New(t)
 	if r, ok := inst.Interface().(Ruler); ok {
@@ -39,107 +32,124 @@ func getRulesForType(t reflect.Type) (any, []*FieldRules) {
 	return nil, nil
 }
 
-// removeSkippedFields deletes schema properties for fields tagged with docs:"skip".
-// Recurses into embedded (anonymous) struct fields.
-func removeSkippedFields(structVal reflect.Value, schema *openapi3.Schema) {
-	for i := range structVal.NumField() {
-		sf := structVal.Type().Field(i)
-		if sf.Anonymous {
-			fi := structVal.Field(i)
-			if sf.Type.Kind() == reflect.Ptr {
-				fi = fi.Elem()
-			}
-			if fi.Kind() == reflect.Struct {
-				removeSkippedFields(fi, schema)
-			}
-			continue
+func removeSkippedFields(t reflect.Type, schema *openapi3.Schema) {
+	for _, sf := range reflect.VisibleFields(t) {
+		if strings.Split(sf.Tag.Get("docs"), ",")[0] == "skip" {
+			delete(schema.Properties, fieldKey(sf))
 		}
-		if strings.Split(sf.Tag.Get("docs"), ",")[0] != "skip" {
-			continue
-		}
-		jsonTag := strings.Split(sf.Tag.Get("json"), ",")[0]
-		delete(schema.Properties, jsonTag)
 	}
 }
 
-// mapFieldsToTags resolves each FieldRules' fieldPtr to its JSON tag name
-// using struct field address comparison.
-func mapFieldsToTags(fields []*FieldRules, structVal reflect.Value) error {
+// Rules are mapped locally without mutating FieldRules, so cached rule sets
+// can also be used safely by concurrent schema generation.
+type schemaFieldRules struct {
+	kind  reflect.Kind
+	rules []Rule
+}
+
+func mapFieldsToTags(fields []*FieldRules, structVal reflect.Value) (map[string]schemaFieldRules, error) {
+	mapped := make(map[string]schemaFieldRules)
 	for i, fr := range fields {
+		if fr == nil {
+			return nil, fmt.Errorf("nil field rule at index %d", i)
+		}
 		fv := reflect.ValueOf(fr.fieldPtr)
-		if fv.Kind() != reflect.Ptr {
-			return fmt.Errorf("rule target for field index %d must be a pointer, got %s", i, fv.Kind())
+		if fv.Kind() != reflect.Ptr || fv.IsNil() {
+			return nil, fmt.Errorf("rule target for field index %d must be a non-nil pointer", i)
 		}
 		sf := findStructField(structVal, fv)
 		if sf == nil {
-			return fmt.Errorf("rule target for field index %d not found in struct %s", i, structVal.Type())
+			return nil, fmt.Errorf("rule target for field index %d not found in struct %s", i, structVal.Type())
 		}
-		if sf.Anonymous {
-			fields[i].tag = ""
+		if sf.Anonymous && strings.Split(sf.Tag.Get("json"), ",")[0] == "" {
 			continue
 		}
-		fields[i].tag = strings.Split(sf.Tag.Get("json"), ",")[0]
+		key := fieldKey(*sf)
+		entry := mapped[key]
+		entry.kind = sf.Type.Kind()
+		entry.rules = append(entry.rules, fr.rules...)
+		mapped[key] = entry
 	}
-	return nil
+	return mapped, nil
 }
 
-// applyRulesToSchema calls Describe on each rule for matching schema properties.
-func applyRulesToSchema(fields []*FieldRules, schema *openapi3.Schema) error {
-	for k, propRef := range schema.Properties {
-		for _, f := range fields {
-			if f.tag != k {
-				continue
-			}
-			for _, rule := range f.rules {
-				if err := rule.Describe(k, schema, propRef); err != nil {
-					return err
+func applyRulesToSchema(fields map[string]schemaFieldRules, schema *openapi3.Schema) error {
+	names := make([]string, 0, len(schema.Properties))
+	for name := range schema.Properties {
+		names = append(names, name)
+	}
+	slices.Sort(names) // stable required-field order and repeatable generated docs
+	for _, name := range names {
+		propRef := schema.Properties[name]
+		field := fields[name]
+		for _, rule := range field.rules {
+			if _, ok := rule.(notNilRule); ok {
+				switch field.kind {
+				case reflect.Ptr, reflect.Interface, reflect.Slice, reflect.Map:
+					// Missing nil-capable fields decode to nil and fail NotNil.
+					// Unlike Required, their zero scalar contents may still pass.
+					if err := Required.Describe(name, schema, propRef); err != nil {
+						return err
+					}
 				}
+			}
+			if err := rule.Describe(name, schema, propRef); err != nil {
+				return fmt.Errorf("describe field %s: %w", name, err)
 			}
 		}
 	}
 	return nil
 }
 
-// schemaDoc returns a SchemaCustomizer that applies validation rules to OpenAPI schemas.
-// The value parameter is only used for resolving interface-typed fields to concrete types.
+// Resolve interface fields of the supplied sample by their actual JSON names,
+// including custom names and embedded fields. Concrete child types get their
+// normal rules, but nil interface samples remain unconstrained.
+func resolveInterfaces(value any, t reflect.Type, schema *openapi3.Schema) error {
+	rv := indirect(value)
+	if rv.Kind() != reflect.Struct || rv.Type() != t {
+		return nil
+	}
+	for _, sf := range reflect.VisibleFields(t) {
+		name := fieldKey(sf)
+		if !sf.IsExported() || schema.Properties[name] == nil {
+			continue
+		}
+		field, err := rv.FieldByIndexErr(sf.Index)
+		if err != nil || field.Kind() != reflect.Interface || field.IsNil() {
+			continue
+		}
+		g := openapi3gen.NewGenerator(openapi3gen.UseAllExportedFields(), openapi3gen.SchemaCustomizer(schemaDoc(nil)))
+		ref, err := g.NewSchemaRefForValue(field.Elem().Interface(), nil)
+		if err != nil {
+			return err
+		}
+		schema.Properties[name] = ref
+	}
+	return nil
+}
+
 func schemaDoc(value any) openapi3gen.SchemaCustomizerFn {
 	return func(name string, t reflect.Type, _ reflect.StructTag, schema *openapi3.Schema) error {
-		// Resolve interface-typed fields to their concrete types.
-		if value != nil && indirect(value).Kind() == reflect.Struct {
-			fn := indirect(value).FieldByName(titleFirst(name))
-			if fn.IsValid() && fn.Kind() == reflect.Interface && fn.Elem().IsValid() && fn.Elem().Kind() != reflect.Interface {
-				g := openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(schemaDoc(nil)))
-				ref, err := g.NewSchemaRefForValue(fn.Elem().Interface(), nil)
-				if err != nil {
-					return err
-				}
-				*schema = *ref.Value
-				return nil
+		if t.Kind() == reflect.Struct {
+			if err := resolveInterfaces(value, t, schema); err != nil {
+				return err
 			}
+			removeSkippedFields(t, schema)
 		}
 
 		vi, fields := getRulesForType(t)
 		if vi == nil {
 			return applyValueRulerSchema(t, name, schema)
 		}
-		structVal := indirect(vi)
-
-		// Expand embedded Ruler fields into the parent's rule set.
 		fields = expandFields(context.Background(), vi, fields)
-
-		removeSkippedFields(structVal, schema)
-
-		if err := mapFieldsToTags(fields, structVal); err != nil {
+		mapped, err := mapFieldsToTags(fields, indirect(vi))
+		if err != nil {
 			return err
 		}
-
-		return applyRulesToSchema(fields, schema)
+		return applyRulesToSchema(mapped, schema)
 	}
 }
 
-// applyValueRulerSchema checks if a type implements ValueRuler and applies
-// its rules' Describe methods to the schema. Used for non-struct types
-// (e.g. type PaymentMethod string) that carry their own validation rules.
 func applyValueRulerSchema(t reflect.Type, name string, schema *openapi3.Schema) error {
 	inst := reflect.New(t)
 	vr, ok := inst.Interface().(ValueRuler)
@@ -155,10 +165,13 @@ func applyValueRulerSchema(t reflect.Type, name string, schema *openapi3.Schema)
 	return nil
 }
 
-// NewSchemaRefForValue generates an OpenAPI schema for the given value,
-// applying validation rules from types that implement [Ruler],
-// [ContextRuler], or [ValueRuler].
+// NewSchemaRefForValue generates an OpenAPI schema for exported JSON fields,
+// applying Ruler, ContextRuler, and ValueRuler rules. Untagged fields use their
+// Go names, just as JSON encoding does. ContextRuler receives a background context.
 func NewSchemaRefForValue(value any) (*openapi3.SchemaRef, error) {
-	g := openapi3gen.NewGenerator(openapi3gen.SchemaCustomizer(schemaDoc(value)))
+	if !reflect.ValueOf(value).IsValid() {
+		return nil, fmt.Errorf("cannot generate a schema for nil")
+	}
+	g := openapi3gen.NewGenerator(openapi3gen.UseAllExportedFields(), openapi3gen.SchemaCustomizer(schemaDoc(value)))
 	return g.NewSchemaRefForValue(value, nil)
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	validation "github.com/go-ozzo/ozzo-validation/v4"
@@ -35,12 +36,22 @@ func Max(threshold any) Rule {
 }
 
 func (r thresholdRule) Describe(_ string, _ *openapi3.Schema, ref *openapi3.SchemaRef) error {
-	if ref.Value.Type.Is(openapi3.TypeString) {
-		ref.Value.Format = fmt.Sprintf("%T", r.threshold)
-	}
 	f, err := getFloat(r.threshold)
 	if err != nil {
 		return err
+	}
+	if ref.Value.Type.Is(openapi3.TypeString) {
+		// OpenAPI numeric bounds do not apply to strings. Preserve the numeric
+		// string constraint as documentation rather than ineffective keywords.
+		if ref.Value.Description != "" && !strings.HasSuffix(ref.Value.Description, " ") {
+			ref.Value.Description += " "
+		}
+		op := "<="
+		if r.min {
+			op = ">="
+		}
+		ref.Value.Description += fmt.Sprintf("numeric value %s %g", op, f)
+		return nil
 	}
 	if r.min {
 		ref.Value.Min = &f
@@ -55,6 +66,9 @@ var floatType = reflect.TypeOf(float64(0))
 func getFloat(unk any) (float64, error) {
 	v := reflect.ValueOf(unk)
 	v = reflect.Indirect(v)
+	if !v.IsValid() {
+		return 0, errors.New("threshold must not be nil")
+	}
 	if !v.Type().ConvertibleTo(floatType) {
 		return 0, fmt.Errorf("cannot convert %v to float64", v.Type())
 	}
@@ -78,6 +92,8 @@ func (r thresholdRule) Validate(value any) error {
 		value = v.String()
 	}
 
+	// Convert named strings before parsing; a type assertion to string panics.
+	value = reflect.ValueOf(value).String()
 	var err error
 	rv := reflect.ValueOf(r.threshold)
 	switch rv.Kind() {

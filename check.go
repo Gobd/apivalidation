@@ -8,7 +8,8 @@ import (
 
 // MissingRules returns the names of exported struct fields that have no
 // corresponding rule in the Ruler's Rules(). Embedded Ruler fields are
-// expanded and their inner fields checked recursively.
+// expanded and their inner fields checked recursively. Structs without Ruler
+// report all eligible fields as missing; nil and non-struct inputs return nil.
 //
 // Automatically excluded:
 //   - json:"-"
@@ -20,25 +21,34 @@ import (
 //	assert.Empty(t, v.MissingRules(&MyStruct{}))
 //	assert.Empty(t, v.MissingRules(&MyStruct{}, "OptionalField"))
 func MissingRules(structPtr any, exclude ...string) []string {
+	structVal := indirect(structPtr)
+	if !structVal.IsValid() || structVal.Kind() != reflect.Struct {
+		return nil
+	}
+	if !structVal.CanAddr() {
+		ptr := reflect.New(structVal.Type())
+		ptr.Elem().Set(structVal)
+		structPtr, structVal = ptr.Interface(), ptr.Elem()
+	}
 	var fields []*FieldRules
 	switch r := structPtr.(type) {
 	case Ruler:
 		fields = r.Rules()
 	case ContextRuler:
 		fields = r.Rules(context.Background())
-	default:
-		return nil
 	}
 
 	// Expand embedded Ruler fields into flat list.
 	fields = expandFields(context.Background(), structPtr, fields)
 
 	// Build set of covered field keys.
-	structVal := reflect.Indirect(reflect.ValueOf(structPtr))
 	covered := map[string]bool{}
 	for _, fr := range fields {
+		if fr == nil {
+			continue
+		}
 		fv := reflect.ValueOf(fr.fieldPtr)
-		if fv.Kind() != reflect.Ptr {
+		if fv.Kind() != reflect.Ptr || fv.IsNil() {
 			continue
 		}
 		sf := findStructField(structVal, fv)
